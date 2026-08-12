@@ -1,116 +1,43 @@
-# GraphFlow Python runtime
+# GraphFlow Python 包
 
-The `_graphflow_native` extension exposes `GraphEngine` and supports native
-C++ nodes and Python nodes in the same graph. Cross-language edges remain
-strongly typed: both sides of the included example use the public C++
-`graphflow::core::PayloadEvent` type from `core/standard_events.h`.
+本目录是 `graphflow-python` 的 Python 包，导出 GraphFlow `GraphEngine` 的原生绑定。完整的环境要求、构建命令、混合节点示例和 API 说明见[仓库顶层 README](../README.md)。
 
-## Build
+本包只封装 GraphEngine；Agent Engine 的 Python SDK 位于独立的 `agent-engine` 仓库中。
+
+## 构建
+
+`_graphflow_native` 必须从仓库根目录通过 CMake 构建。以下命令适用于 PowerShell：
 
 ```powershell
-cmake -S . -B build -DGRAPHFLOW_BUILD_PYTHON_SDK=ON
+# 在 graphflow-python 仓库根目录执行
+git submodule update --init --recursive
+python -m pip install pybind11 pytest
+
+cmake -S . -B build `
+  -Dpybind11_DIR="$(python -m pybind11 --cmakedir)"
 cmake --build build --config Release --target _graphflow_native
+
+python -m examples.mixed_graph
+python -m pytest graphflow/tests -q
 ```
 
-The extension is written into `sdk/python/graphflow`. Run Python from
-`sdk/python`, or install the Python package in editable mode.
+CMake 会将扩展模块输出到本目录。当前 `pyproject.toml` 尚未接入 CMake 扩展构建，因此 `pip install .` 不会生成 `_graphflow_native`。
 
-## Mixed graph
+## 导出 API
 
 ```python
-from graphflow import GraphEngine, PayloadEvent
-
-class Transform:
-    def __init__(self, context, params):
-        self.context = context
-
-    def on_init(self):
-        self.context.subscribe_payload(self.on_payload)
-        return True
-
-    def on_payload(self, event):
-        self.context.publish_payload(
-            PayloadEvent(event.payload.upper(), event.sequence + 1)
-        )
-
-engine = GraphEngine()
-engine.register_standard_payload_nodes()
-engine.register_python_node("Transform", Transform)
+from graphflow import (
+    GraphEngine,
+    LifecycleState,
+    NodeContext,
+    PayloadEvent,
+    PYTHON_EVENT_TYPE,
+)
 ```
 
-`register_standard_payload_nodes()` supplies `NativePayloadSource` and
-`NativePayloadSink`, which are useful for examples and smoke tests. Production
-native nodes continue to be registered through the normal C++ `NodeFactory`.
+- `GraphEngine`：注册 Python 节点，加载或重载图，并管理生命周期。
+- `NodeContext`：在 Python 节点内订阅和发布事件。
+- `PayloadEvent`：C++ 与 Python 节点共享的公共示例事件。
+- `PYTHON_EVENT_TYPE`：纯 Python 节点之间传递 Python 对象时使用的边类型。
 
-Python node factories receive `(context, params)`. Optional lifecycle methods
-are `on_init`, `on_start`, `on_stop`, `on_release`, and `on_halt`.
-
-## Pure Python events
-
-Python-only edges do not require a new native event binding. Use the single
-native `PYTHON_EVENT_TYPE` carrier in the graph and ordinary Python classes in
-node code:
-
-```python
-from dataclasses import dataclass
-from graphflow import PYTHON_EVENT_TYPE
-
-@dataclass
-class TextEvent:
-    text: str
-
-class Producer:
-    def __init__(self, context, params):
-        self.context = context
-
-    def on_start(self):
-        self.context.publish(TextEvent("hello"))
-        return True
-
-class Consumer:
-    def __init__(self, context, params):
-        self.context = context
-
-    def on_init(self):
-        self.context.subscribe(TextEvent, self.on_text)
-        return True
-
-    def on_text(self, event):
-        print(event.text)
-```
-
-Configure the edge as `{"edge": PYTHON_EVENT_TYPE}`. The original Python
-object is passed by reference and filtered with `isinstance`; it is not
-serialized. Use this channel only when every producer and consumer on the edge
-is a Python node. Native consumers still require a concrete C++ event binding.
-
-A complete offline agent made of five pure Python nodes is available at
-`sdk/python/examples/pure_python_agent.py`. Run it from `sdk/python`:
-
-```powershell
-# Interactive multi-turn conversation
-python -m examples.pure_python_agent
-
-# One-shot invocation
-python -m examples.pure_python_agent "请计算 12 / 3 + 5"
-```
-
-The interactive shell keeps one `GraphEngine` running across all turns. Use
-`/history` to display conversation history and `/quit` to stop the graph.
-`InputNode` subscribes once with
-`context.subscribe_global(UserRequest, callback)`; every command-line turn is
-injected through `engine.publish_global(UserRequest(...))` and then forwarded
-onto the graph's first edge. No new engine or agent graph is created per turn.
-
-## Adding another concrete event
-
-Concrete event types are compile-time C++ types because `EventBus` uses
-templated `publish<T>` and `subscribe<T>`. To expose another type:
-
-1. Define it in a public C++ header using `EventT<MyEvent>`.
-2. Add a `py::class_<MyEvent>` binding.
-3. Add matching context publish/subscribe adapters that instantiate
-   `GraphNode::publish<MyEvent>` and `GraphNode::subscribe<MyEvent>`.
-
-This keeps C++ and Python on the same exact event type and avoids JSON
-serialization.
+可运行的 C++ / Python 混合图见 [`../examples/mixed_graph.py`](../examples/mixed_graph.py)。
