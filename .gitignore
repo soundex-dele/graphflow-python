@@ -1,0 +1,12 @@
+build/
+build-*/
+logs/
+*.pyd
+*.so
+*.dll
+*.ilk
+*.pdb
+__pycache__/
+.pytest_cache/
+.venv/
+examples/_data/

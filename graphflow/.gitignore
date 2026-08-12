@@ -1,0 +1,6 @@
+__pycache__/
+*.pyd
+*.so
+*.dylib
+*.pdb
+*.ilk
